@@ -63,6 +63,30 @@ async function run() {
         const classesCollection = db.collection("classes");
         const slotsCollection = db.collection("slots");
 
+        // 🔎 Get a single trainer by ID
+        app.get('/trainers/:id', async (req, res) => {
+            const id = req.params.id;
+            const query = { _id: new ObjectId(id) };
+            const trainer = await usersCollection.findOne(query);
+            res.send(trainer);
+        });
+
+
+        // 🔎 Get slots by trainer email
+        app.get('/slots/trainer/:email', async (req, res) => {
+            const email = req.params.email;
+            const query = { trainerEmail: email };
+            const result = await slotsCollection.find(query).toArray();
+            res.send(result);
+        });
+
+        // 🔎 Get all trainers
+        app.get('/trainers', async (req, res) => {
+            const query = { role: 'trainer' };
+            const trainers = await usersCollection.find(query).toArray();
+            res.send(trainers);
+        });
+
         // GET: All slots for a specific trainer by email
         app.get('/slots', async (req, res) => {
             const email = req.query.email;
