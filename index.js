@@ -63,6 +63,14 @@ async function run() {
         const classesCollection = db.collection("classes");
         const slotsCollection = db.collection("slots");
 
+        // 🧑‍🏫 Save Applied Trainer
+        app.post('/applied-trainers', async (req, res) => {
+            const application = req.body;
+            application.status = 'pending';
+            const result = await db.collection('appliedTrainers').insertOne(application);
+            res.send(result);
+        });
+
         // 🔎 Get a single trainer by ID
         app.get('/trainers/:id', async (req, res) => {
             const id = req.params.id;
