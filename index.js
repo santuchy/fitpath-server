@@ -62,6 +62,45 @@ async function run() {
         const usersCollection = db.collection("users");
         const classesCollection = db.collection("classes");
         const slotsCollection = db.collection("slots");
+        const appliedTrainersCollection = db.collection("appliedTrainers");
+        const rejectedTrainersCollection = db.collection("rejectedTrainers");
+
+        // 🔎 Get all applied trainers
+        app.get('/applied-trainers', async (req, res) => {
+            const result = await db.collection('appliedTrainers').find({}).toArray();
+            res.send(result);
+        });
+
+        app.patch('/confirm-trainer/:id', async (req, res) => {
+            const { id } = req.params;
+
+            const appliedTrainer = await db.collection('appliedTrainers').findOne({ _id: new ObjectId(id) });
+            if (!appliedTrainer) return res.status(404).send({ message: 'Trainer not found' });
+
+            // Update user role to 'trainer'
+            const updateUser = await db.collection('users').updateOne(
+                { email: appliedTrainer.email },
+                { $set: { role: 'trainer' } }
+            );
+
+            // Remove from applied list
+            const removeApplied = await db.collection('appliedTrainers').deleteOne({ _id: new ObjectId(id) });
+
+            res.send({ updateUser, removeApplied });
+        });
+
+        app.delete('/reject-trainer/:id', async (req, res) => {
+            const { id } = req.params;
+            const { feedback } = req.body;  // The reason for rejection
+
+            // Save feedback (optional)
+            const result = await db.collection('rejectedTrainers').insertOne({ appliedId: id, feedback });
+
+            // Remove from appliedTrainers
+            const remove = await db.collection('appliedTrainers').deleteOne({ _id: new ObjectId(id) });
+
+            res.send({ result, remove });
+        });
 
         // 🧑‍🏫 Save Applied Trainer
         app.post('/applied-trainers', async (req, res) => {
