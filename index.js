@@ -65,42 +65,164 @@ async function run() {
         const appliedTrainersCollection = db.collection("appliedTrainers");
         const rejectedTrainersCollection = db.collection("rejectedTrainers");
 
-        // 🔎 Get all applied trainers
-        app.get('/applied-trainers', async (req, res) => {
-            const result = await db.collection('appliedTrainers').find({}).toArray();
-            res.send(result);
+
+        // Route to handle slot booking and membership selection
+        app.post('/book-slot', async (req, res) => {
+            const { trainerId, slotId, userId, selectedPackage } = req.body;
+
+            try {
+                // Fetch the trainer's info from the users collection
+                const trainer = await usersCollection.findOne({ _id: new ObjectId(trainerId) });
+
+                if (!trainer || trainer.role !== 'trainer') {
+                    return res.status(404).json({ message: 'Trainer not found or not a trainer' });
+                }
+
+                // Fetch the slot info
+                const slot = await slotsCollection.findOne({ _id: new ObjectId(slotId) });
+                if (!slot) {
+                    return res.status(404).json({ message: 'Slot not found' });
+                }
+
+                // Save the booking information to the bookings collection
+                const booking = {
+                    trainerId,
+                    slotId,
+                    userId,
+                    selectedPackage,
+                    bookingStatus: 'pending', // Set booking status to pending until payment is completed
+                    bookingTime: new Date(),
+                };
+
+                const result = await bookingsCollection.insertOne(booking);
+
+                // Send a success response with booking info
+                res.status(201).json({ message: 'Slot booked successfully', bookingId: result.insertedId });
+            } catch (error) {
+                console.error('Error booking slot:', error);
+                res.status(500).json({ message: 'Failed to book slot. Please try again.' });
+            }
         });
 
-        app.patch('/confirm-trainer/:id', async (req, res) => {
+
+
+        // Get a specific slot by ID
+        app.get('/slots/:id', async (req, res) => {
+            const { id } = req.params;
+            const slot = await slotsCollection.findOne({ _id: new ObjectId(id) });
+            if (!slot) {
+                return res.status(404).send({ message: 'Slot not found' });
+            }
+            res.send(slot);
+        });
+
+        // Get trainer info by email
+        app.get('/trainers/:email', async (req, res) => {
+            const { email } = req.params;
+            const trainer = await usersCollection.findOne({ email });
+            if (!trainer) {
+                return res.status(404).send({ message: 'Trainer not found' });
+            }
+            res.send(trainer);
+        });
+
+        // Increment the slot booking count
+        app.patch('/slots/book/:id', async (req, res) => {
+            const { id } = req.params;
+            const updatedSlot = await slotsCollection.updateOne(
+                { _id: new ObjectId(id) },
+                { $inc: { totalBookings: 1 } }
+            );
+            if (updatedSlot.modifiedCount > 0) {
+                res.send({ message: 'Slot booked successfully' });
+            } else {
+                res.status(400).send({ message: 'Booking failed' });
+            }
+        });
+
+
+        // Get all applied trainers
+        app.get('/applied-trainers', async (req, res) => {
+            try {
+                const appliedTrainers = await appliedTrainersCollection.find({}).toArray();
+                res.json(appliedTrainers);
+            } catch (error) {
+                console.error("Error fetching applied trainers:", error);
+                res.status(500).json({ message: "Error fetching applied trainers" });
+            }
+        });
+
+
+        // Confirm trainer and move to trainer list (add to users collection)
+        app.post('/confirm-trainer/:id', async (req, res) => {
             const { id } = req.params;
 
-            const appliedTrainer = await db.collection('appliedTrainers').findOne({ _id: new ObjectId(id) });
-            if (!appliedTrainer) return res.status(404).send({ message: 'Trainer not found' });
+            try {
+                // Fetch the applied trainer from the applied-trainers collection
+                const appliedTrainer = await appliedTrainersCollection.findOne({ _id: new ObjectId(id) });
 
-            // Update user role to 'trainer'
-            const updateUser = await db.collection('users').updateOne(
-                { email: appliedTrainer.email },
-                { $set: { role: 'trainer' } }
-            );
+                if (!appliedTrainer) {
+                    return res.status(404).json({ message: 'Trainer not found in applied list' });
+                }
 
-            // Remove from applied list
-            const removeApplied = await db.collection('appliedTrainers').deleteOne({ _id: new ObjectId(id) });
+                // Add the confirmed trainer to the 'users' collection
+                const addTrainer = await usersCollection.insertOne({
+                    ...appliedTrainer,
+                    role: 'trainer', // Set the role to 'trainer'
+                    status: 'confirmed' // Update status to 'confirmed'
+                });
 
-            res.send({ updateUser, removeApplied });
+                if (!addTrainer.acknowledged) {
+                    return res.status(500).json({ message: 'Failed to add trainer to users collection' });
+                }
+
+                // Remove from the applied trainers collection
+                await appliedTrainersCollection.deleteOne({ _id: new ObjectId(id) });
+
+                // Send a success response
+                res.json({ message: 'Trainer confirmed and added to the users collection successfully!' });
+
+            } catch (error) {
+                console.error('Error confirming trainer:', error);
+                res.status(500).json({ message: 'An error occurred while confirming the trainer', error });
+            }
         });
 
+
+
+
+
+
+
+        // Reject trainer (move applied trainer to 'rejected' list)
         app.delete('/reject-trainer/:id', async (req, res) => {
             const { id } = req.params;
-            const { feedback } = req.body;  // The reason for rejection
+            const { feedback } = req.body;
 
-            // Save feedback (optional)
-            const result = await db.collection('rejectedTrainers').insertOne({ appliedId: id, feedback });
+            if (!feedback) {
+                return res.status(400).json({ message: 'Feedback is required for rejection' });
+            }
 
-            // Remove from appliedTrainers
-            const remove = await db.collection('appliedTrainers').deleteOne({ _id: new ObjectId(id) });
+            try {
+                // Move the rejected trainer to the rejected collection
+                const rejectedTrainer = await appliedTrainersCollection.findOne({ _id: new ObjectId(id) });
 
-            res.send({ result, remove });
+                if (!rejectedTrainer) {
+                    return res.status(404).json({ message: 'Trainer not found for rejection' });
+                }
+
+                await db.collection('rejectedTrainers').insertOne({ appliedId: id, feedback });
+
+                // Remove the rejected trainer from the applied list
+                const removeApplied = await appliedTrainersCollection.deleteOne({ _id: new ObjectId(id) });
+
+                res.json({ message: 'Trainer rejected', rejectedTrainer, removeApplied });
+            } catch (error) {
+                console.error('Error rejecting trainer:', error);
+                res.status(500).json({ message: 'An error occurred while rejecting the trainer' });
+            }
         });
+
 
         // 🧑‍🏫 Save Applied Trainer
         app.post('/applied-trainers', async (req, res) => {
@@ -127,11 +249,56 @@ async function run() {
             res.send(result);
         });
 
-        // 🔎 Get all trainers
+
+
+
+        // // Get all trainers
         app.get('/trainers', async (req, res) => {
-            const query = { role: 'trainer' };
-            const trainers = await usersCollection.find(query).toArray();
-            res.send(trainers);
+            try {
+                const trainers = await usersCollection.find({ role: 'trainer' }).toArray();
+                res.json(trainers);  // Send the list of trainers as JSON
+            } catch (error) {
+                console.error("Error fetching trainers:", error);
+                res.status(500).json({ error: "Failed to fetch trainers. Please try again later." });
+            }
+        });
+
+
+        // Server-side route to get a trainer by ID (ObjectId format)
+        app.get('/trainer/:id', async (req, res) => {
+            const { id } = req.params;
+            try {
+                // Convert the string ID to ObjectId for querying
+                const trainer = await usersCollection.findOne({ _id: new ObjectId(id) });
+
+                if (!trainer) {
+                    return res.status(404).send({ message: 'Trainer not found' });
+                }
+
+                res.send(trainer);  // Send the trainer data as a response
+            } catch (error) {
+                console.error('Error fetching trainer:', error);
+                res.status(500).send({ message: 'Server error' });
+            }
+        });
+
+
+
+
+
+        // Get slots for a specific trainer by email
+        app.get('/slots/trainer/:email', async (req, res) => {
+            const { email } = req.params;
+            try {
+                const slots = await slotsCollection.find({ trainerEmail: email }).toArray();
+                if (slots.length === 0) {
+                    return res.status(404).json({ message: "No slots found for this trainer." });
+                }
+                res.json(slots);  // Send the slots data
+            } catch (error) {
+                console.error("Error fetching slots:", error);
+                res.status(500).json({ error: "Failed to fetch slots. Please try again later." });
+            }
         });
 
         // GET: All slots for a specific trainer by email
@@ -140,6 +307,31 @@ async function run() {
             const query = { email };
             const result = await slotsCollection.find(query).toArray();
             res.send(result);
+        });
+
+        // Route to fetch slots by the logged-in trainer's email
+        app.get("/slots", async (req, res) => {
+            const { email } = req.query; // Get trainer email from the query parameter
+
+            // Check if the email is provided in the request
+            if (!email) {
+                return res.status(400).json({ error: "Email is required" });
+            }
+
+            try {
+                // Find the slots that match the trainer's email
+                const slots = await slotsCollection.find({ trainerEmail: email }).toArray();
+
+                // If slots are found, return them
+                if (slots.length > 0) {
+                    return res.json(slots);
+                } else {
+                    return res.status(404).json({ message: "No slots found for this trainer." });
+                }
+            } catch (error) {
+                console.error("Error fetching slots:", error);
+                res.status(500).json({ error: "Failed to fetch slots. Please try again later." });
+            }
         });
 
         // DELETE: Slot by ID
