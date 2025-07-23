@@ -66,6 +66,30 @@ async function run() {
         const rejectedTrainersCollection = db.collection("rejectedTrainers");
 
 
+       // GET all available slots
+app.get('/available-slots', async (req, res) => {
+  try {
+    const availableSlots = await slotsCollection.find({ isAvailable: true }).toArray();
+
+    if (!availableSlots.length) {
+      return res.status(404).json({ message: "No available slots found" });
+    }
+
+    res.json(availableSlots);
+  } catch (error) {
+    console.error("Error fetching available slots:", error);
+    res.status(500).json({ message: "Failed to fetch available slots" });
+  }
+});
+
+
+
+
+
+
+
+
+
         // Route to handle slot booking and membership selection
         app.post('/book-slot', async (req, res) => {
             const { trainerId, slotId, userId, selectedPackage } = req.body;
@@ -222,6 +246,19 @@ async function run() {
                 res.status(500).json({ message: 'An error occurred while rejecting the trainer' });
             }
         });
+        
+        // Assuming you have an endpoint to create a new slot
+app.post('/applied-trainers', async (req, res) => {
+  const application = req.body;
+  application.status = 'pending';
+  try {
+    const result = await appliedTrainersCollection.insertOne(application);
+    res.send(result);
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to submit trainer application' });
+  }
+});
+
 
 
         // 🧑‍🏫 Save Applied Trainer
