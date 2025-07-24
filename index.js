@@ -1,10 +1,15 @@
+const dotenv = require('dotenv');
 const express = require('express');
 const cors = require('cors');
-const dotenv = require('dotenv');
+
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
 // Load env variable from .env file
 dotenv.config();
+
+const stripe = require('stripe')(process.env.PAYMENT_GATEWAY_KEY);
+
+
 
 const app = express();
 const port = process.env.port || 3000;
@@ -17,7 +22,6 @@ app.use(express.json());
 // admin.initializeApp({
 //   credential: admin.credential.cert(serviceAccount)
 // });
-
 
 
 
@@ -66,21 +70,44 @@ async function run() {
         const rejectedTrainersCollection = db.collection("rejectedTrainers");
 
 
-       // GET all available slots
-app.get('/available-slots', async (req, res) => {
-  try {
-    const availableSlots = await slotsCollection.find({ isAvailable: true }).toArray();
+        app.post('/create-payment-intent', async (req, res) => {
+            const { slotId, package: packageType } = req.body;
 
-    if (!availableSlots.length) {
-      return res.status(404).json({ message: "No available slots found" });
-    }
+            let amount = 1000;
+            if (packageType === "standard") amount = 5000;
+            if (packageType === "premium") amount = 10000;
 
-    res.json(availableSlots);
-  } catch (error) {
-    console.error("Error fetching available slots:", error);
-    res.status(500).json({ message: "Failed to fetch available slots" });
-  }
-});
+            try {
+                const paymentIntent = await stripe.paymentIntents.create({
+                    amount,
+                    currency: 'usd',
+                    payment_method_types: ['card'],
+                });
+
+                res.send({ clientSecret: paymentIntent.client_secret });
+            } catch (err) {
+                console.error("Stripe error:", err);
+                res.status(500).send({ error: err.message });
+            }
+        });
+
+
+
+        // GET all available slots
+        app.get('/available-slots', async (req, res) => {
+            try {
+                const availableSlots = await slotsCollection.find({ isAvailable: true }).toArray();
+
+                if (!availableSlots.length) {
+                    return res.status(404).json({ message: "No available slots found" });
+                }
+
+                res.json(availableSlots);
+            } catch (error) {
+                console.error("Error fetching available slots:", error);
+                res.status(500).json({ message: "Failed to fetch available slots" });
+            }
+        });
 
 
 
@@ -246,18 +273,18 @@ app.get('/available-slots', async (req, res) => {
                 res.status(500).json({ message: 'An error occurred while rejecting the trainer' });
             }
         });
-        
+
         // Assuming you have an endpoint to create a new slot
-app.post('/applied-trainers', async (req, res) => {
-  const application = req.body;
-  application.status = 'pending';
-  try {
-    const result = await appliedTrainersCollection.insertOne(application);
-    res.send(result);
-  } catch (error) {
-    res.status(500).json({ message: 'Failed to submit trainer application' });
-  }
-});
+        app.post('/applied-trainers', async (req, res) => {
+            const application = req.body;
+            application.status = 'pending';
+            try {
+                const result = await appliedTrainersCollection.insertOne(application);
+                res.send(result);
+            } catch (error) {
+                res.status(500).json({ message: 'Failed to submit trainer application' });
+            }
+        });
 
 
 
