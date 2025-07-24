@@ -1,7 +1,6 @@
 const dotenv = require('dotenv');
 const express = require('express');
 const cors = require('cors');
-
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
 // Load env variable from .env file
@@ -68,8 +67,38 @@ async function run() {
         const slotsCollection = db.collection("slots");
         const appliedTrainersCollection = db.collection("appliedTrainers");
         const rejectedTrainersCollection = db.collection("rejectedTrainers");
+        const paymentsCollection = db.collection("payments");
 
 
+        // Payment Save API
+        app.post("/payments", async (req, res) => {
+            try {
+                const payment = req.body;
+
+                // Save payment in DB
+                const insertResult = await paymentsCollection.insertOne(payment);
+
+                // Update booking count in the class
+                const classUpdate = await classesCollection.updateOne(
+                    { name: payment.className },
+                    { $inc: { bookingCount: 1 } }
+                );
+
+                res.send({
+                    success: true,
+                    insertedId: insertResult.insertedId,
+                    classUpdated: classUpdate.modifiedCount > 0,
+                });
+            } catch (error) {
+                console.error("Error in /payments:", error);
+                res.status(500).send({ success: false, message: "Payment failed to save" });
+            }
+        });
+
+
+
+
+        // payment intent for stripe integration
         app.post('/create-payment-intent', async (req, res) => {
             const { slotId, package: packageType } = req.body;
 
