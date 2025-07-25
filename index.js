@@ -69,48 +69,81 @@ async function run() {
         const rejectedTrainersCollection = db.collection("rejectedTrainers");
         const paymentsCollection = db.collection("payments");
         const reviewsCollection = db.collection("reviews");
-        
 
-        // booked trainer get api
-app.get("/booked-trainers/:email", async (req, res) => {
+// GET user’s trainer application statuses (pending + rejected)
+app.get('/my-applications/:email', async (req, res) => {
+  const { email } = req.params;
+
   try {
-    const email = req.params.email;
-    const payments = await paymentsCollection.find({ userEmail: email }).toArray();
-    res.send(payments);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send({ error: "Failed to fetch booked trainers" });
+    const applied = await appliedTrainersCollection.find({ email }).toArray();
+    const rejected = await rejectedTrainersCollection.find({ email }).toArray();
+
+    const formattedApplied = applied.map(app => ({
+      name: app.name,
+      email: app.email,
+      status: "Pending",
+    }));
+
+    const formattedRejected = rejected.map(app => ({
+      name: app.name,
+      email: app.email,
+      status: "Rejected",
+      message: app.feedback || "No feedback provided",
+    }));
+
+    const combined = [...formattedApplied, ...formattedRejected];
+
+    res.send(combined);
+  } catch (error) {
+    console.error("Error fetching applications:", error);
+    res.status(500).send({ message: "Server error" });
   }
 });
 
 
+
+
+
+        // booked trainer get api
+        app.get("/booked-trainers/:email", async (req, res) => {
+            try {
+                const email = req.params.email;
+                const payments = await paymentsCollection.find({ userEmail: email }).toArray();
+                res.send(payments);
+            } catch (err) {
+                console.error(err);
+                res.status(500).send({ error: "Failed to fetch booked trainers" });
+            }
+        });
+
+
         // Get all reviews (for homepage testimonial slider)
-app.get('/reviews', async (req, res) => {
-    try {
-        const reviews = await reviewsCollection
-            .find({})
-            .sort({ createdAt: -1 })
-            .toArray();
-        res.send(reviews);
-    } catch (error) {
-        console.error("Error fetching reviews:", error);
-        res.status(500).json({ error: "Failed to fetch reviews" });
-    }
-});
+        app.get('/reviews', async (req, res) => {
+            try {
+                const reviews = await reviewsCollection
+                    .find({})
+                    .sort({ createdAt: -1 })
+                    .toArray();
+                res.send(reviews);
+            } catch (error) {
+                console.error("Error fetching reviews:", error);
+                res.status(500).json({ error: "Failed to fetch reviews" });
+            }
+        });
 
         // Save review to DB
-app.post('/reviews', async (req, res) => {
-    const review = req.body;
-    try {
-        const result = await reviewsCollection.insertOne(review);
-        res.send({ insertedId: result.insertedId });
-    } catch (error) {
-        console.error("Error saving review:", error);
-        res.status(500).json({ error: "Failed to save review" });
-    }
-});
+        app.post('/reviews', async (req, res) => {
+            const review = req.body;
+            try {
+                const result = await reviewsCollection.insertOne(review);
+                res.send({ insertedId: result.insertedId });
+            } catch (error) {
+                console.error("Error saving review:", error);
+                res.status(500).json({ error: "Failed to save review" });
+            }
+        });
 
-      
+
 
         // Payment Save API
         app.post("/payments", async (req, res) => {
@@ -230,26 +263,26 @@ app.post('/reviews', async (req, res) => {
 
         // Get a specific slot by ID
         app.get('/slots/:id', async (req, res) => {
-  const { id } = req.params;
+            const { id } = req.params;
 
-  // 🔒 Validate ObjectId
-  if (!ObjectId.isValid(id)) {
-    return res.status(400).json({ message: "Invalid slot ID format" });
-  }
+            // 🔒 Validate ObjectId
+            if (!ObjectId.isValid(id)) {
+                return res.status(400).json({ message: "Invalid slot ID format" });
+            }
 
-  try {
-    const slot = await slotsCollection.findOne({ _id: new ObjectId(id) });
+            try {
+                const slot = await slotsCollection.findOne({ _id: new ObjectId(id) });
 
-    if (!slot) {
-      return res.status(404).send({ message: 'Slot not found' });
-    }
+                if (!slot) {
+                    return res.status(404).send({ message: 'Slot not found' });
+                }
 
-    res.send(slot);
-  } catch (error) {
-    console.error("Error fetching slot by ID:", error);
-    res.status(500).json({ message: "Server error while fetching slot" });
-  }
-});
+                res.send(slot);
+            } catch (error) {
+                console.error("Error fetching slot by ID:", error);
+                res.status(500).json({ message: "Server error while fetching slot" });
+            }
+        });
 
 
 
@@ -331,34 +364,45 @@ app.post('/reviews', async (req, res) => {
 
 
 
-        // Reject trainer (move applied trainer to 'rejected' list)
-        app.delete('/reject-trainer/:id', async (req, res) => {
-            const { id } = req.params;
-            const { feedback } = req.body;
+      // Reject trainer (move applied trainer to 'rejected' list)
+app.delete('/reject-trainer/:id', async (req, res) => {
+  const { id } = req.params;
+  const { feedback } = req.body;
 
-            if (!feedback) {
-                return res.status(400).json({ message: 'Feedback is required for rejection' });
-            }
+  if (!feedback) {
+    return res.status(400).json({ message: 'Feedback is required for rejection' });
+  }
 
-            try {
-                // Move the rejected trainer to the rejected collection
-                const rejectedTrainer = await appliedTrainersCollection.findOne({ _id: new ObjectId(id) });
+  try {
+    // Get the rejected trainer info from applied collection
+    const rejectedTrainer = await appliedTrainersCollection.findOne({ _id: new ObjectId(id) });
 
-                if (!rejectedTrainer) {
-                    return res.status(404).json({ message: 'Trainer not found for rejection' });
-                }
+    if (!rejectedTrainer) {
+      return res.status(404).json({ message: 'Trainer not found for rejection' });
+    }
 
-                await db.collection('rejectedTrainers').insertOne({ appliedId: id, feedback });
+    // Save relevant data to rejectedTrainers
+    const rejectedDoc = {
+      name: rejectedTrainer.name,
+      email: rejectedTrainer.email,
+      feedback,
+      status: "Rejected",
+      appliedId: id,
+      timestamp: new Date(),
+    };
 
-                // Remove the rejected trainer from the applied list
-                const removeApplied = await appliedTrainersCollection.deleteOne({ _id: new ObjectId(id) });
+    await rejectedTrainersCollection.insertOne(rejectedDoc);
 
-                res.json({ message: 'Trainer rejected', rejectedTrainer, removeApplied });
-            } catch (error) {
-                console.error('Error rejecting trainer:', error);
-                res.status(500).json({ message: 'An error occurred while rejecting the trainer' });
-            }
-        });
+    // Remove from applied
+    await appliedTrainersCollection.deleteOne({ _id: new ObjectId(id) });
+
+    res.json({ message: 'Trainer rejected successfully' });
+  } catch (error) {
+    console.error('Error rejecting trainer:', error);
+    res.status(500).json({ message: 'An error occurred while rejecting the trainer' });
+  }
+});
+
 
         // Assuming you have an endpoint to create a new slot
         app.post('/applied-trainers', async (req, res) => {
