@@ -68,7 +68,49 @@ async function run() {
         const appliedTrainersCollection = db.collection("appliedTrainers");
         const rejectedTrainersCollection = db.collection("rejectedTrainers");
         const paymentsCollection = db.collection("payments");
+        const reviewsCollection = db.collection("reviews");
+        
 
+        // booked trainer get api
+app.get("/booked-trainers/:email", async (req, res) => {
+  try {
+    const email = req.params.email;
+    const payments = await paymentsCollection.find({ userEmail: email }).toArray();
+    res.send(payments);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ error: "Failed to fetch booked trainers" });
+  }
+});
+
+
+        // Get all reviews (for homepage testimonial slider)
+app.get('/reviews', async (req, res) => {
+    try {
+        const reviews = await reviewsCollection
+            .find({})
+            .sort({ createdAt: -1 })
+            .toArray();
+        res.send(reviews);
+    } catch (error) {
+        console.error("Error fetching reviews:", error);
+        res.status(500).json({ error: "Failed to fetch reviews" });
+    }
+});
+
+        // Save review to DB
+app.post('/reviews', async (req, res) => {
+    const review = req.body;
+    try {
+        const result = await reviewsCollection.insertOne(review);
+        res.send({ insertedId: result.insertedId });
+    } catch (error) {
+        console.error("Error saving review:", error);
+        res.status(500).json({ error: "Failed to save review" });
+    }
+});
+
+      
 
         // Payment Save API
         app.post("/payments", async (req, res) => {
@@ -188,13 +230,28 @@ async function run() {
 
         // Get a specific slot by ID
         app.get('/slots/:id', async (req, res) => {
-            const { id } = req.params;
-            const slot = await slotsCollection.findOne({ _id: new ObjectId(id) });
-            if (!slot) {
-                return res.status(404).send({ message: 'Slot not found' });
-            }
-            res.send(slot);
-        });
+  const { id } = req.params;
+
+  // 🔒 Validate ObjectId
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).json({ message: "Invalid slot ID format" });
+  }
+
+  try {
+    const slot = await slotsCollection.findOne({ _id: new ObjectId(id) });
+
+    if (!slot) {
+      return res.status(404).send({ message: 'Slot not found' });
+    }
+
+    res.send(slot);
+  } catch (error) {
+    console.error("Error fetching slot by ID:", error);
+    res.status(500).json({ message: "Server error while fetching slot" });
+  }
+});
+
+
 
         // Get trainer info by email
         app.get('/trainers/:email', async (req, res) => {
