@@ -69,36 +69,63 @@ async function run() {
         const rejectedTrainersCollection = db.collection("rejectedTrainers");
         const paymentsCollection = db.collection("payments");
         const reviewsCollection = db.collection("reviews");
+        const newsletterCollection = db.collection("newsletter");
 
-// GET user’s trainer application statuses (pending + rejected)
-app.get('/my-applications/:email', async (req, res) => {
-  const { email } = req.params;
 
-  try {
-    const applied = await appliedTrainersCollection.find({ email }).toArray();
-    const rejected = await rejectedTrainersCollection.find({ email }).toArray();
+        // get and post api for newsletter
+        app.post("/newsletter-subscribe", async (req, res) => {
+            const { name, email } = req.body;
+            if (!name || !email) {
+                return res.status(400).json({ message: "Name and email are required" });
+            }
 
-    const formattedApplied = applied.map(app => ({
-      name: app.name,
-      email: app.email,
-      status: "Pending",
-    }));
+            try {
+                await newsletterCollection.insertOne({ name, email, subscribedAt: new Date() });
+                res.status(200).json({ message: "Subscribed successfully" });
+            } catch (err) {
+                console.error("Newsletter subscription failed:", err);
+                res.status(500).json({ message: "Server error" });
+            }
+        });
 
-    const formattedRejected = rejected.map(app => ({
-      name: app.name,
-      email: app.email,
-      status: "Rejected",
-      message: app.feedback || "No feedback provided",
-    }));
+        app.get("/newsletter-subscribers", async (req, res) => {
+            try {
+                const allSubscribers = await newsletterCollection.find().toArray();
+                res.json(allSubscribers);
+            } catch (err) {
+                res.status(500).json({ message: "Failed to fetch subscribers" });
+            }
+        });
 
-    const combined = [...formattedApplied, ...formattedRejected];
+        // GET user’s trainer application statuses (pending + rejected)
+        app.get('/my-applications/:email', async (req, res) => {
+            const { email } = req.params;
 
-    res.send(combined);
-  } catch (error) {
-    console.error("Error fetching applications:", error);
-    res.status(500).send({ message: "Server error" });
-  }
-});
+            try {
+                const applied = await appliedTrainersCollection.find({ email }).toArray();
+                const rejected = await rejectedTrainersCollection.find({ email }).toArray();
+
+                const formattedApplied = applied.map(app => ({
+                    name: app.name,
+                    email: app.email,
+                    status: "Pending",
+                }));
+
+                const formattedRejected = rejected.map(app => ({
+                    name: app.name,
+                    email: app.email,
+                    status: "Rejected",
+                    message: app.feedback || "No feedback provided",
+                }));
+
+                const combined = [...formattedApplied, ...formattedRejected];
+
+                res.send(combined);
+            } catch (error) {
+                console.error("Error fetching applications:", error);
+                res.status(500).send({ message: "Server error" });
+            }
+        });
 
 
 
@@ -364,44 +391,44 @@ app.get('/my-applications/:email', async (req, res) => {
 
 
 
-      // Reject trainer (move applied trainer to 'rejected' list)
-app.delete('/reject-trainer/:id', async (req, res) => {
-  const { id } = req.params;
-  const { feedback } = req.body;
+        // Reject trainer (move applied trainer to 'rejected' list)
+        app.delete('/reject-trainer/:id', async (req, res) => {
+            const { id } = req.params;
+            const { feedback } = req.body;
 
-  if (!feedback) {
-    return res.status(400).json({ message: 'Feedback is required for rejection' });
-  }
+            if (!feedback) {
+                return res.status(400).json({ message: 'Feedback is required for rejection' });
+            }
 
-  try {
-    // Get the rejected trainer info from applied collection
-    const rejectedTrainer = await appliedTrainersCollection.findOne({ _id: new ObjectId(id) });
+            try {
+                // Get the rejected trainer info from applied collection
+                const rejectedTrainer = await appliedTrainersCollection.findOne({ _id: new ObjectId(id) });
 
-    if (!rejectedTrainer) {
-      return res.status(404).json({ message: 'Trainer not found for rejection' });
-    }
+                if (!rejectedTrainer) {
+                    return res.status(404).json({ message: 'Trainer not found for rejection' });
+                }
 
-    // Save relevant data to rejectedTrainers
-    const rejectedDoc = {
-      name: rejectedTrainer.name,
-      email: rejectedTrainer.email,
-      feedback,
-      status: "Rejected",
-      appliedId: id,
-      timestamp: new Date(),
-    };
+                // Save relevant data to rejectedTrainers
+                const rejectedDoc = {
+                    name: rejectedTrainer.name,
+                    email: rejectedTrainer.email,
+                    feedback,
+                    status: "Rejected",
+                    appliedId: id,
+                    timestamp: new Date(),
+                };
 
-    await rejectedTrainersCollection.insertOne(rejectedDoc);
+                await rejectedTrainersCollection.insertOne(rejectedDoc);
 
-    // Remove from applied
-    await appliedTrainersCollection.deleteOne({ _id: new ObjectId(id) });
+                // Remove from applied
+                await appliedTrainersCollection.deleteOne({ _id: new ObjectId(id) });
 
-    res.json({ message: 'Trainer rejected successfully' });
-  } catch (error) {
-    console.error('Error rejecting trainer:', error);
-    res.status(500).json({ message: 'An error occurred while rejecting the trainer' });
-  }
-});
+                res.json({ message: 'Trainer rejected successfully' });
+            } catch (error) {
+                console.error('Error rejecting trainer:', error);
+                res.status(500).json({ message: 'An error occurred while rejecting the trainer' });
+            }
+        });
 
 
         // Assuming you have an endpoint to create a new slot
