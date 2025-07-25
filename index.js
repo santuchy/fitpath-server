@@ -70,6 +70,56 @@ async function run() {
         const paymentsCollection = db.collection("payments");
         const reviewsCollection = db.collection("reviews");
         const newsletterCollection = db.collection("newsletter");
+        const forumsCollection = db.collection("forums");
+
+
+        // ✅ Get paginated forum posts (6 per page)
+        app.get("/forums", async (req, res) => {
+            const page = parseInt(req.query.page) || 1;
+            const limit = 6;
+            const skip = (page - 1) * limit;
+
+            const total = await forumsCollection.countDocuments();
+            const forums = await forumsCollection.find({})
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .toArray();
+
+            res.send({ forums, total });
+        });
+
+        // ✅ Get latest forum posts for homepage (limit 6)
+        app.get("/forums/latest", async (req, res) => {
+            const latest = await forumsCollection.find({})
+                .sort({ createdAt: -1 })
+                .limit(6)
+                .toArray();
+            res.send(latest);
+        });
+
+        // ✅ Add new forum post (admin/trainer)
+        app.post("/forums", async (req, res) => {
+            const post = req.body;
+            post.createdAt = new Date();
+            post.upvotes = 0;
+            post.downvotes = 0;
+            const result = await forumsCollection.insertOne(post);
+            res.send(result);
+        });
+
+        // ✅ Vote system (upvote/downvote)
+        app.patch("/forums/vote/:id", async (req, res) => {
+            const { id } = req.params;
+            const { type } = req.body; // 'upvote' or 'downvote'
+            const update = type === 'upvote' ? { $inc: { upvotes: 1 } } : { $inc: { downvotes: 1 } };
+
+            const result = await forumsCollection.updateOne(
+                { _id: new ObjectId(id) },
+                update
+            );
+            res.send(result);
+        });
 
 
         // get and post api for newsletter
