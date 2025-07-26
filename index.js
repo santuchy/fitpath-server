@@ -73,6 +73,75 @@ async function run() {
         const forumsCollection = db.collection("forums");
 
 
+
+        // Get paginated classes with search and max 5 trainers per class
+        app.get("/paginated-classes", async (req, res) => {
+            try {
+                const page = parseInt(req.query.page) || 1;
+                const limit = 6;
+                const search = req.query.search || "";
+                const skip = (page - 1) * limit;
+
+                const filter = {
+                    name: { $regex: search, $options: "i" },
+                };
+
+                const total = await classesCollection.countDocuments(filter);
+
+                const classes = await classesCollection
+                    .find(filter)
+                    .skip(skip)
+                    .limit(limit)
+                    .toArray();
+
+                const enrichedClasses = await Promise.all(
+                    classes.map(async (cls) => {
+                        const trainers = await usersCollection
+                            .find({
+                                role: "trainer",
+                                skills: { $in: [cls.name] }, // ✅ THIS LINE FIXED
+                            })
+                            .limit(5)
+                            .project({ name: 1, image: 1, _id: 1 })
+                            .toArray();
+
+                        return {
+                            ...cls,
+                            trainers,
+                        };
+                    })
+                );
+
+                res.send({ total, classes: enrichedClasses });
+            } catch (error) {
+                console.error("Error fetching paginated classes:", error);
+                res.status(500).send({ error: "Failed to load classes" });
+            }
+        });
+
+
+
+
+
+        // GET top 6 featured classes sorted by total booking count
+        app.get("/classes/featured", async (req, res) => {
+            try {
+                const featured = await classesCollection
+                    .find({})
+                    .sort({ bookingCount: -1 })
+                    .limit(6)
+                    .toArray();
+
+                res.send(featured);
+            } catch (error) {
+                console.error("Error fetching featured classes:", error);
+                res.status(500).json({ message: "Internal Server Error" });
+            }
+        });
+
+
+
+
         // ✅ Get paginated forum posts (6 per page)
         app.get("/forums", async (req, res) => {
             const page = parseInt(req.query.page) || 1;
