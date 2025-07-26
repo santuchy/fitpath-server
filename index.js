@@ -72,6 +72,75 @@ async function run() {
         const newsletterCollection = db.collection("newsletter");
         const forumsCollection = db.collection("forums");
 
+        // ✅ Demote trainer to member
+app.patch('/trainers/demote/:email', async (req, res) => {
+  const { email } = req.params;
+  try {
+    const result = await usersCollection.updateOne(
+      { email: email, role: 'trainer' }, // must match existing trainer
+      { $set: { role: 'member' } }
+    );
+    if (result.modifiedCount > 0) {
+      res.send({ success: true });
+    } else {
+      res.status(404).send({ success: false, message: 'Not found or already a member' });
+    }
+  } catch (error) {
+    console.error("Error in demotion:", error);
+    res.status(500).send({ success: false, message: 'Internal Server Error' });
+  }
+});
+
+// ✅ Get only confirmed trainers
+app.get('/trainers', async (req, res) => {
+  try {
+    const trainers = await usersCollection.find({ role: 'trainer' }).toArray();
+    res.send(trainers);
+  } catch (err) {
+    res.status(500).send({ message: "Failed to fetch trainers" });
+  }
+});
+
+
+
+
+// Add this to your server file where other routes are declared
+app.get('/chart-stats', async (req, res) => {
+  try {
+    const totalPayments = await paymentsCollection.find({}).toArray();
+
+    const totalBalance = totalPayments.reduce((sum, p) => sum + (p.price || 0), 0);
+
+    const lastSix = totalPayments
+      .filter(p => p.date)
+      .sort((a, b) => new Date(b.date) - new Date(a.date))
+      .slice(0, 6)
+      .map(p => ({
+        amount: p.price || 0,
+        memberName: p.userName || "Unknown",
+        date: p.date || new Date()
+      }));
+
+    const newsletterCount = await newsletterCollection.countDocuments();
+    const paidMembers = await usersCollection.countDocuments({});
+
+    res.send({
+      totalBalance,
+      lastSix,
+      newsletterCount,
+      paidMembers
+    });
+  } catch (error) {
+    console.error("Chart Stats Error:", error);
+    res.status(500).send({ error: "Server error fetching chart stats." });
+  }
+});
+
+
+
+
+
+
 
 
         // Get paginated classes with search and max 5 trainers per class
