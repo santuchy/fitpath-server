@@ -2,6 +2,7 @@ const dotenv = require('dotenv');
 const express = require('express');
 const cors = require('cors');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const admin = require("firebase-admin");
 
 // Load env variable from .env file
 dotenv.config();
@@ -16,6 +17,15 @@ const port = process.env.port || 3000;
 // middleware
 app.use(cors());
 app.use(express.json());
+
+
+
+
+var serviceAccount = require("./firebase-admin-key.json");
+
+admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+});
 
 
 // admin.initializeApp({
@@ -37,24 +47,6 @@ const client = new MongoClient(uri, {
 });
 
 
-// Verify Firebase Token Middleware
-
-// const verifyToken = async (req, res, next) => {
-//   const authHeader = req.headers.authorization;
-//   if (!authHeader) return res.status(401).send({ error: 'Unauthorized access' });
-
-//   const token = authHeader.split(' ')[1];
-//   try {
-//     const decoded = await admin.auth().verifyIdToken(token);
-//     req.user = decoded;
-//     next();
-//   } catch (error) {
-//     res.status(403).send({ error: 'Forbidden access' });
-//   }
-// };
-
-
-
 
 async function run() {
     try {
@@ -72,69 +64,125 @@ async function run() {
         const newsletterCollection = db.collection("newsletter");
         const forumsCollection = db.collection("forums");
 
+
+        // Verify Firebase Token Middleware
+
+        const verifyFBToken = async (req, res, next) => {
+            const authHeader = req.headers.authorization;
+            if (!authHeader) return res.status(401).send({ message: 'Unauthorized access' });
+
+            const token = authHeader.split(' ')[1];
+            if (!token) {
+                return res.status(401).send({ message: 'Unauthorized access' });
+            }
+            //   verify the token
+            try {
+                const decoded = await admin.auth().verifyIdToken(token);
+                req.decoded = decoded;
+                console.log('Decoded User:', req.decoded);
+                next();
+            } catch (error) {
+                console.error('Error verifying token:', error);
+                res.status(403).send({ error: 'Forbidden access' });
+            }
+        };
+
+        const verifyAdmin = async (req, res, next) => {
+            if (!req.decoded || !req.decoded.email) {
+                return res.status(403).send({ message: 'Email not found in token' });
+            }
+            const email = req.decoded.email;
+            const query = { email }
+            const user = await usersCollection.findOne(query);
+            if (!user || user.role !== 'admin') {
+                return res.status(403).send({ message: 'forbidden access' })
+            }
+            next();
+        }
+
+
+
+        // ✅ Get role of a user
+        app.get('/users/role/:email', async (req, res) => {
+            const { email } = req.params;
+            try {
+                const user = await usersCollection.findOne({ email });
+                if (!user) {
+                    return res.status(404).json({ role: null });
+                }
+                res.json({ role: user.role || 'member' }); // fallback if role not set
+            } catch (e) {
+                res.status(500).json({ role: null });
+            }
+        });
+
+
         // ✅ Demote trainer to member
-app.patch('/trainers/demote/:email', async (req, res) => {
-  const { email } = req.params;
-  try {
-    const result = await usersCollection.updateOne(
-      { email: email, role: 'trainer' }, // must match existing trainer
-      { $set: { role: 'member' } }
-    );
-    if (result.modifiedCount > 0) {
-      res.send({ success: true });
-    } else {
-      res.status(404).send({ success: false, message: 'Not found or already a member' });
-    }
-  } catch (error) {
-    console.error("Error in demotion:", error);
-    res.status(500).send({ success: false, message: 'Internal Server Error' });
-  }
-});
-
-// ✅ Get only confirmed trainers
-app.get('/trainers', async (req, res) => {
-  try {
-    const trainers = await usersCollection.find({ role: 'trainer' }).toArray();
-    res.send(trainers);
-  } catch (err) {
-    res.status(500).send({ message: "Failed to fetch trainers" });
-  }
-});
+        app.patch('/trainers/demote/:email', async (req, res) => {
+            const { email } = req.params;
+            try {
+                const result = await usersCollection.updateOne(
+                    { email: email, role: 'trainer' }, // must match existing trainer
+                    { $set: { role: 'user' } }
+                );
+                if (result.modifiedCount > 0) {
+                    res.send({ success: true });
+                } else {
+                    res.status(404).send({ success: false, message: 'Not found or already a member' });
+                }
+            } catch (error) {
+                console.error("Error in demotion:", error);
+                res.status(500).send({ success: false, message: 'Internal Server Error' });
+            }
+        });
 
 
 
+        // Get all trainers
+        app.get('/trainers', async (req, res) => {
+            try {
+                const trainers = await usersCollection.find({ role: 'trainer' }).toArray();
+                res.json(trainers);  // Send the list of trainers as JSON
+            } catch (error) {
+                console.error("Error fetching trainers:", error);
+                res.status(500).json({ error: "Failed to fetch trainers. Please try again later." });
+            }
+        });
 
-// Add this to your server file where other routes are declared
-app.get('/chart-stats', async (req, res) => {
-  try {
-    const totalPayments = await paymentsCollection.find({}).toArray();
 
-    const totalBalance = totalPayments.reduce((sum, p) => sum + (p.price || 0), 0);
 
-    const lastSix = totalPayments
-      .filter(p => p.date)
-      .sort((a, b) => new Date(b.date) - new Date(a.date))
-      .slice(0, 6)
-      .map(p => ({
-        amount: p.price || 0,
-        memberName: p.userName || "Unknown",
-        date: p.date || new Date()
-      }));
 
-    const newsletterCount = await newsletterCollection.countDocuments();
-    const paidMembers = await usersCollection.countDocuments({});
+        // Add this to your server file where other routes are declared
+        app.get('/chart-stats', verifyFBToken, verifyAdmin, async (req, res) => {
+            try {
+                const totalPayments = await paymentsCollection.find({}).toArray();
 
-    res.send({
-      totalBalance,
-      lastSix,
-      newsletterCount,
-      paidMembers
-    });
-  } catch (error) {
-    console.error("Chart Stats Error:", error);
-    res.status(500).send({ error: "Server error fetching chart stats." });
-  }
-});
+                const totalBalance = totalPayments.reduce((sum, p) => sum + (p.price || 0), 0);
+
+                const lastSix = totalPayments
+                    .filter(p => p.date)
+                    .sort((a, b) => new Date(b.date) - new Date(a.date))
+                    .slice(0, 6)
+                    .map(p => ({
+                        amount: p.price || 0,
+                        memberName: p.userName || "Unknown",
+                        date: p.date || new Date()
+                    }));
+
+                const newsletterCount = await newsletterCollection.countDocuments();
+                const paidMembers = await usersCollection.countDocuments({});
+
+                res.send({
+                    totalBalance,
+                    lastSix,
+                    newsletterCount,
+                    paidMembers
+                });
+            } catch (error) {
+                console.error("Chart Stats Error:", error);
+                res.status(500).send({ error: "Server error fetching chart stats." });
+            }
+        });
 
 
 
@@ -260,6 +308,7 @@ app.get('/chart-stats', async (req, res) => {
         });
 
 
+
         // get and post api for newsletter
         app.post("/newsletter-subscribe", async (req, res) => {
             const { name, email } = req.body;
@@ -276,7 +325,7 @@ app.get('/chart-stats', async (req, res) => {
             }
         });
 
-        app.get("/newsletter-subscribers", async (req, res) => {
+        app.get("/newsletter-subscribers", verifyFBToken, verifyAdmin, async (req, res) => {
             try {
                 const allSubscribers = await newsletterCollection.find().toArray();
                 res.json(allSubscribers);
@@ -320,11 +369,20 @@ app.get('/chart-stats', async (req, res) => {
 
 
         // booked trainer get api
-        app.get("/booked-trainers/:email", async (req, res) => {
+        app.get("/booked-trainers/:email", verifyFBToken, async (req, res) => {
             try {
                 const email = req.params.email;
+
+                console.log('decoded', req.decoded);
+                if (req.decoded.email !== email) {
+                    return res.status(403).send({ message: 'forbidden access' })
+                }
+
+
                 const payments = await paymentsCollection.find({ userEmail: email }).toArray();
                 res.send(payments);
+
+
             } catch (err) {
                 console.error(err);
                 res.status(500).send({ error: "Failed to fetch booked trainers" });
@@ -527,7 +585,7 @@ app.get('/chart-stats', async (req, res) => {
 
 
         // Get all applied trainers
-        app.get('/applied-trainers', async (req, res) => {
+        app.get('/applied-trainers', verifyFBToken, verifyAdmin, async (req, res) => {
             try {
                 const appliedTrainers = await appliedTrainersCollection.find({}).toArray();
                 res.json(appliedTrainers);
@@ -538,33 +596,51 @@ app.get('/chart-stats', async (req, res) => {
         });
 
 
-        // Confirm trainer and move to trainer list (add to users collection)
-        app.post('/confirm-trainer/:id', async (req, res) => {
-            const { id } = req.params;
+
+        // Confirm trainer and update the user in the users collection
+        app.post('/confirm-trainer', async (req, res) => {
+            const { email } = req.body; // Using email to identify the trainer
 
             try {
-                // Fetch the applied trainer from the applied-trainers collection
-                const appliedTrainer = await appliedTrainersCollection.findOne({ _id: new ObjectId(id) });
+                const appliedTrainer = await appliedTrainersCollection.findOne({ email });
 
                 if (!appliedTrainer) {
                     return res.status(404).json({ message: 'Trainer not found in applied list' });
                 }
 
-                // Add the confirmed trainer to the 'users' collection
-                const addTrainer = await usersCollection.insertOne({
-                    ...appliedTrainer,
-                    role: 'trainer', // Set the role to 'trainer'
-                    status: 'confirmed' // Update status to 'confirmed'
-                });
+                // Check if the user already exists in the users collection
+                const existingUser = await usersCollection.findOne({ email });
 
-                if (!addTrainer.acknowledged) {
-                    return res.status(500).json({ message: 'Failed to add trainer to users collection' });
+                if (existingUser) {
+                    if (existingUser.role === 'trainer') {
+                        return res.status(400).json({ message: 'This user is already a trainer' });
+                    }
+
+                    // Update the existing user in the users collection to have the role 'trainer'
+                    const updateResult = await usersCollection.updateOne(
+                        { email: appliedTrainer.email },
+                        { $set: { role: 'trainer', status: 'confirmed' } } // Update role to 'trainer'
+                    );
+
+                    if (updateResult.modifiedCount === 0) {
+                        return res.status(500).json({ message: 'Failed to update user role to trainer' });
+                    }
+                } else {
+                    // Add the confirmed trainer to the 'users' collection if they don't exist
+                    const addTrainer = await usersCollection.insertOne({
+                        ...appliedTrainer,
+                        role: 'trainer', // Set the role to 'trainer'
+                        status: 'confirmed', // Update status to 'confirmed'
+                    });
+
+                    if (!addTrainer.acknowledged) {
+                        return res.status(500).json({ message: 'Failed to add trainer to users collection' });
+                    }
                 }
 
                 // Remove from the applied trainers collection
-                await appliedTrainersCollection.deleteOne({ _id: new ObjectId(id) });
+                await appliedTrainersCollection.deleteOne({ email });
 
-                // Send a success response
                 res.json({ message: 'Trainer confirmed and added to the users collection successfully!' });
 
             } catch (error) {
@@ -580,36 +656,34 @@ app.get('/chart-stats', async (req, res) => {
 
 
         // Reject trainer (move applied trainer to 'rejected' list)
-        app.delete('/reject-trainer/:id', async (req, res) => {
-            const { id } = req.params;
-            const { feedback } = req.body;
+        app.delete('/reject-trainer', async (req, res) => {
+            const { email, feedback } = req.body;
 
             if (!feedback) {
                 return res.status(400).json({ message: 'Feedback is required for rejection' });
             }
 
             try {
-                // Get the rejected trainer info from applied collection
-                const rejectedTrainer = await appliedTrainersCollection.findOne({ _id: new ObjectId(id) });
+                const rejectedTrainer = await appliedTrainersCollection.findOne({ email });
 
                 if (!rejectedTrainer) {
                     return res.status(404).json({ message: 'Trainer not found for rejection' });
                 }
 
-                // Save relevant data to rejectedTrainers
+                // Save relevant data to rejectedTrainers collection
                 const rejectedDoc = {
                     name: rejectedTrainer.name,
                     email: rejectedTrainer.email,
                     feedback,
-                    status: "Rejected",
-                    appliedId: id,
+                    status: "Rejected", // Mark the trainer as rejected
+                    appliedId: rejectedTrainer._id,
                     timestamp: new Date(),
                 };
 
                 await rejectedTrainersCollection.insertOne(rejectedDoc);
 
                 // Remove from applied
-                await appliedTrainersCollection.deleteOne({ _id: new ObjectId(id) });
+                await appliedTrainersCollection.deleteOne({ email });
 
                 res.json({ message: 'Trainer rejected successfully' });
             } catch (error) {
@@ -617,6 +691,7 @@ app.get('/chart-stats', async (req, res) => {
                 res.status(500).json({ message: 'An error occurred while rejecting the trainer' });
             }
         });
+
 
 
         // Assuming you have an endpoint to create a new slot
@@ -661,16 +736,7 @@ app.get('/chart-stats', async (req, res) => {
 
 
 
-        // // Get all trainers
-        app.get('/trainers', async (req, res) => {
-            try {
-                const trainers = await usersCollection.find({ role: 'trainer' }).toArray();
-                res.json(trainers);  // Send the list of trainers as JSON
-            } catch (error) {
-                console.error("Error fetching trainers:", error);
-                res.status(500).json({ error: "Failed to fetch trainers. Please try again later." });
-            }
-        });
+
 
 
         // Server-side route to get a trainer by ID (ObjectId format)
@@ -710,13 +776,13 @@ app.get('/chart-stats', async (req, res) => {
             }
         });
 
-        // GET: All slots for a specific trainer by email
-        app.get('/slots', async (req, res) => {
-            const email = req.query.email;
-            const query = { email };
-            const result = await slotsCollection.find(query).toArray();
-            res.send(result);
-        });
+        // // GET: All slots for a specific trainer by email
+        // app.get('/slots', async (req, res) => {
+        //     const email = req.query.email;
+        //     const query = { email };
+        //     const result = await slotsCollection.find(query).toArray();
+        //     res.send(result);
+        // });
 
         // Route to fetch slots by the logged-in trainer's email
         app.get("/slots", async (req, res) => {
@@ -744,12 +810,21 @@ app.get('/chart-stats', async (req, res) => {
         });
 
         // DELETE: Slot by ID
+        // Slot deletion logic
         app.delete('/slots/:id', async (req, res) => {
-            const id = req.params.id;
-            const query = { _id: new ObjectId(id) };
-            const result = await slotsCollection.deleteOne(query);
-            res.send(result);
+            const { id } = req.params;
+            try {
+                const result = await slotsCollection.deleteOne({ _id: new ObjectId(id) });
+                if (result.deletedCount === 0) {
+                    return res.status(404).send({ message: 'Slot not found' });
+                }
+                res.status(200).send({ message: 'Slot deleted successfully' });
+            } catch (error) {
+                console.error("Error deleting slot:", error);
+                res.status(500).send({ message: 'Failed to delete slot' });
+            }
         });
+
 
         // GET all classes
         app.get('/classes', async (req, res) => {
@@ -797,14 +872,15 @@ app.get('/chart-stats', async (req, res) => {
 
         // Save user to DB
         app.post('/users', async (req, res) => {
-            const user = req.body;
-            const query = { email: user.email };
-            const exists = await usersCollection.findOne(query);
-            if (exists) return res.send({ message: 'User already exists' });
+            const email = req.body.email;
+            const userExists = await usersCollection.findOne({ email });
+            if (userExists) return res.status(200).send({ message: 'User already exists', insertedId: false });
 
+            const user = req.body;
             const result = await usersCollection.insertOne(user);
             res.send(result);
         });
+
 
         // Get all users (admin only)
         app.get('/users', async (req, res) => {
