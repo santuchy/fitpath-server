@@ -100,7 +100,18 @@ async function run() {
             next();
         }
 
-
+        const verifyTrainer = async (req, res, next) => {
+            if (!req.decoded || !req.decoded.email) {
+                return res.status(403).send({ message: 'Email not found in token' });
+            }
+            const email = req.decoded.email;
+            const query = { email }
+            const user = await usersCollection.findOne(query);
+            if (!user || user.role !== 'trainer') {
+                return res.status(403).send({ message: 'forbidden access' })
+            }
+            next();
+        }
 
         // ✅ Get role of a user
         app.get('/users/role/:email', async (req, res) => {
@@ -110,7 +121,7 @@ async function run() {
                 if (!user) {
                     return res.status(404).json({ role: null });
                 }
-                res.json({ role: user.role || 'member' }); // fallback if role not set
+                res.json({ role: user.role || 'member' }); 
             } catch (e) {
                 res.status(500).json({ role: null });
             }
@@ -122,7 +133,7 @@ async function run() {
             const { email } = req.params;
             try {
                 const result = await usersCollection.updateOne(
-                    { email: email, role: 'trainer' }, // must match existing trainer
+                    { email: email, role: 'trainer' }, 
                     { $set: { role: 'user' } }
                 );
                 if (result.modifiedCount > 0) {
@@ -136,20 +147,16 @@ async function run() {
             }
         });
 
-
-
         // Get all trainers
         app.get('/trainers', async (req, res) => {
             try {
                 const trainers = await usersCollection.find({ role: 'trainer' }).toArray();
-                res.json(trainers);  // Send the list of trainers as JSON
+                res.json(trainers);  
             } catch (error) {
                 console.error("Error fetching trainers:", error);
                 res.status(500).json({ error: "Failed to fetch trainers. Please try again later." });
             }
         });
-
-
 
 
         // Add this to your server file where other routes are declared
@@ -183,12 +190,6 @@ async function run() {
                 res.status(500).send({ error: "Server error fetching chart stats." });
             }
         });
-
-
-
-
-
-
 
 
         // Get paginated classes with search and max 5 trainers per class
@@ -256,9 +257,6 @@ async function run() {
             }
         });
 
-
-
-
         // ✅ Get paginated forum posts (6 per page)
         app.get("/forums", async (req, res) => {
             const page = parseInt(req.query.page) || 1;
@@ -297,7 +295,7 @@ async function run() {
         // ✅ Vote system (upvote/downvote)
         app.patch("/forums/vote/:id", async (req, res) => {
             const { id } = req.params;
-            const { type } = req.body; // 'upvote' or 'downvote'
+            const { type } = req.body; 
             const update = type === 'upvote' ? { $inc: { upvotes: 1 } } : { $inc: { downvotes: 1 } };
 
             const result = await forumsCollection.updateOne(
@@ -306,8 +304,6 @@ async function run() {
             );
             res.send(result);
         });
-
-
 
         // get and post api for newsletter
         app.post("/newsletter-subscribe", async (req, res) => {
@@ -363,10 +359,6 @@ async function run() {
                 res.status(500).send({ message: "Server error" });
             }
         });
-
-
-
-
 
         // booked trainer get api
         app.get("/booked-trainers/:email", verifyFBToken, async (req, res) => {
@@ -443,9 +435,6 @@ async function run() {
             }
         });
 
-
-
-
         // payment intent for stripe integration
         app.post('/create-payment-intent', async (req, res) => {
             const { slotId, package: packageType } = req.body;
@@ -468,8 +457,6 @@ async function run() {
             }
         });
 
-
-
         // GET all available slots
         app.get('/available-slots', async (req, res) => {
             try {
@@ -485,14 +472,6 @@ async function run() {
                 res.status(500).json({ message: "Failed to fetch available slots" });
             }
         });
-
-
-
-
-
-
-
-
 
         // Route to handle slot booking and membership selection
         app.post('/book-slot', async (req, res) => {
@@ -518,7 +497,7 @@ async function run() {
                     slotId,
                     userId,
                     selectedPackage,
-                    bookingStatus: 'pending', // Set booking status to pending until payment is completed
+                    bookingStatus: 'pending', 
                     bookingTime: new Date(),
                 };
 
@@ -531,8 +510,6 @@ async function run() {
                 res.status(500).json({ message: 'Failed to book slot. Please try again.' });
             }
         });
-
-
 
         // Get a specific slot by ID
         app.get('/slots/:id', async (req, res) => {
@@ -595,11 +572,9 @@ async function run() {
             }
         });
 
-
-
         // Confirm trainer and update the user in the users collection
         app.post('/confirm-trainer', async (req, res) => {
-            const { email } = req.body; // Using email to identify the trainer
+            const { email } = req.body; 
 
             try {
                 const appliedTrainer = await appliedTrainersCollection.findOne({ email });
@@ -619,7 +594,7 @@ async function run() {
                     // Update the existing user in the users collection to have the role 'trainer'
                     const updateResult = await usersCollection.updateOne(
                         { email: appliedTrainer.email },
-                        { $set: { role: 'trainer', status: 'confirmed' } } // Update role to 'trainer'
+                        { $set: { role: 'trainer', status: 'confirmed' } } 
                     );
 
                     if (updateResult.modifiedCount === 0) {
@@ -629,8 +604,8 @@ async function run() {
                     // Add the confirmed trainer to the 'users' collection if they don't exist
                     const addTrainer = await usersCollection.insertOne({
                         ...appliedTrainer,
-                        role: 'trainer', // Set the role to 'trainer'
-                        status: 'confirmed', // Update status to 'confirmed'
+                        role: 'trainer', 
+                        status: 'confirmed',
                     });
 
                     if (!addTrainer.acknowledged) {
@@ -648,12 +623,6 @@ async function run() {
                 res.status(500).json({ message: 'An error occurred while confirming the trainer', error });
             }
         });
-
-
-
-
-
-
 
         // Reject trainer (move applied trainer to 'rejected' list)
         app.delete('/reject-trainer', async (req, res) => {
@@ -692,8 +661,6 @@ async function run() {
             }
         });
 
-
-
         // Assuming you have an endpoint to create a new slot
         app.post('/applied-trainers', async (req, res) => {
             const application = req.body;
@@ -705,8 +672,6 @@ async function run() {
                 res.status(500).json({ message: 'Failed to submit trainer application' });
             }
         });
-
-
 
         // 🧑‍🏫 Save Applied Trainer
         app.post('/applied-trainers', async (req, res) => {
@@ -733,12 +698,6 @@ async function run() {
             res.send(result);
         });
 
-
-
-
-
-
-
         // Server-side route to get a trainer by ID (ObjectId format)
         app.get('/trainer/:id', async (req, res) => {
             const { id } = req.params;
@@ -756,10 +715,6 @@ async function run() {
                 res.status(500).send({ message: 'Server error' });
             }
         });
-
-
-
-
 
         // Get slots for a specific trainer by email
         app.get('/slots/trainer/:email', async (req, res) => {
@@ -785,7 +740,7 @@ async function run() {
         // });
 
         // Route to fetch slots by the logged-in trainer's email
-        app.get("/slots", async (req, res) => {
+        app.get("/slots", verifyFBToken, verifyTrainer, async (req, res) => {
             const { email } = req.query; // Get trainer email from the query parameter
 
             // Check if the email is provided in the request
@@ -824,7 +779,6 @@ async function run() {
                 res.status(500).send({ message: 'Failed to delete slot' });
             }
         });
-
 
         // GET all classes
         app.get('/classes', async (req, res) => {
@@ -869,7 +823,6 @@ async function run() {
             res.send(users);
         });
 
-
         // Save user to DB
         app.post('/users', async (req, res) => {
             const email = req.body.email;
@@ -881,7 +834,6 @@ async function run() {
             res.send(result);
         });
 
-
         // Get all users (admin only)
         app.get('/users', async (req, res) => {
             const users = await usersCollection.find().toArray();
@@ -892,10 +844,6 @@ async function run() {
         app.get('/secure-data', (req, res) => {
             res.send({ message: `Welcome, ${req.user.email}` });
         });
-
-
-
-
 
         // Send a ping to confirm a successful connection
         await client.db("admin").command({ ping: 1 });
